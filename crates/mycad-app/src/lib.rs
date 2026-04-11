@@ -1752,7 +1752,15 @@ impl eframe::App for MyCadApp {
         // Status bar
         egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                if in_sketch {
+                if in_param_sketch {
+                    ui.label(egui::RichText::new("PARAMETRIC SKETCH").color(egui::Color32::from_rgb(100, 255, 100)));
+                    if let Some(SubEditorState::Sketch { local_sketch, .. }) = &self.sub_editor {
+                        ui.separator();
+                        let entity_count = local_sketch.entities.len();
+                        let constraint_count = local_sketch.constraints().count();
+                        ui.label(format!("{} entities, {} constraints", entity_count, constraint_count));
+                    }
+                } else if in_sketch {
                     ui.label(egui::RichText::new("SKETCH MODE").color(egui::Color32::from_rgb(50, 200, 255)));
                     if let Some(session) = &self.sketch_session {
                         ui.separator();

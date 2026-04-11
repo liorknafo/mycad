@@ -1791,8 +1791,15 @@ impl eframe::App for MyCadApp {
                         selected_entity,
                         ..
                     }) = &self.sub_editor {
+                        // Show sketch statistics at top
+                        ui.label(egui::RichText::new("Sketch Statistics").strong());
+                        ui.label(format!("Entities: {}", local_sketch.entities.len()));
+                        ui.label(format!("Constraints: {}", local_sketch.constraints().count()));
+                        ui.separator();
+
                         if let Some(entity_id) = selected_entity {
                             if let Some(entity) = local_sketch.entity(*entity_id) {
+                                ui.heading("Selected Entity");
                                 ui.label(format!("Type: {}", entity_type_name(&entity.geometry)));
                                 ui.label(format!("ID: {}", entity_id.0));
 
@@ -1826,7 +1833,7 @@ impl eframe::App for MyCadApp {
                                 ui.label("Selected entity not found");
                             }
                         } else {
-                            ui.label("No selection");
+                            ui.label("(Click entity to select)");
                         }
                     } else {
                         ui.label("Not in sketch mode");

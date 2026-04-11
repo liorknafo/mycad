@@ -30,7 +30,17 @@ pub enum SketchTool {
     Arc,
 }
 
-/// Local editing state for sketches or extrude parameters within the document.
+/// Local editing state for parametric feature editing within the document.
+///
+/// When a user enters the parametric sketch editing mode (future UI), MyCadApp
+/// creates a SubEditorState that holds the local copy of the geometry being edited,
+/// plus undo/redo stacks and tool state. On commit, the local edits are pushed back
+/// to the document node, the node is marked dirty, and a rebuild is scheduled.
+///
+/// This enum exists as part of the staged migration to parametric architecture.
+/// Currently the legacy sketch_session is the primary UI; SubEditorState provides
+/// the parametric pathway that will eventually replace it. Both can coexist during
+/// transition (sketch_session for legacy flow, SubEditorState for new flow).
 pub enum SubEditorState {
     Sketch {
         node_id: NodeId,
@@ -604,6 +614,14 @@ impl MyCadApp {
     }
 
     /// Start a parametric sketch on the XY world plane.
+    ///
+    /// Creates a CreateDatumPlaneOp for the world XY plane and a CreateSketchOp on that plane.
+    /// Initializes SubEditorState::Sketch for local editing with undo/redo support.
+    /// Schedules a deferred rebuild via rebuild_pending_since.
+    ///
+    /// This is part of the staged migration to parametric architecture. Currently, the legacy
+    /// sketch_session path is the primary UI flow; this method provides the parametric pathway
+    /// that will eventually replace it.
     #[allow(dead_code)]
     fn start_param_sketch(&mut self) {
         // Create a datum plane operation on the world XY plane.
@@ -648,6 +666,12 @@ impl MyCadApp {
     }
 
     /// Commit the current parametric sketch edits back to the document.
+    ///
+    /// Updates the CreateSketchOp in the document with the local_sketch modifications.
+    /// Marks the sketch node as dirty so the rebuild engine propagates the change downstream.
+    /// Clears sub_editor but schedules a rebuild via request_param_rebuild_soon.
+    ///
+    /// Returns Err if not in sketch editing mode or if the node lookup fails.
     #[allow(dead_code)]
     fn commit_param_sketch_edits(&mut self) -> Result<(), String> {
         let sub_editor = match &mut self.sub_editor {
@@ -678,6 +702,9 @@ impl MyCadApp {
     }
 
     /// Cancel parametric sketch edits without committing.
+    ///
+    /// Discards local_sketch modifications and clears SubEditorState.
+    /// Does not mark the sketch node as dirty, so no rebuild is triggered.
     #[allow(dead_code)]
     fn cancel_param_sketch_edits(&mut self) {
         self.sub_editor = None;
@@ -685,15 +712,33 @@ impl MyCadApp {
         self.status_message = "Sketch editing cancelled".to_string();
     }
 
-    /// Request a deferred rebuild. The rebuild will execute on the next update
-    /// if enough time has passed since the last edit.
+    /// Request a deferred rebuild with debouncing.
+    ///
+    /// Sets rebuild_pending_since to now(). The rebuild is executed only when
+    /// perform_param_rebuild_if_due() detects that >= REBUILD_DEBOUNCE_MS have elapsed.
+    /// This prevents thrashing with frequent edits and allows batching multiple changes
+    /// into a single rebuild cycle.
     #[allow(dead_code)]
     fn request_param_rebuild_soon(&mut self) {
         self.rebuild_pending_since = Some(std::time::Instant::now());
     }
 
-    /// Perform rebuild if enough time has passed since the last edit.
-    /// Uses a 100ms debounce to avoid thrashing with frequent updates.
+    /// Perform deferred rebuild if the debounce timer has expired.
+    ///
+    /// Executes rebuild() on the parametric document only if >= REBUILD_DEBOUNCE_MS
+    /// (100ms) have passed since the most recent call to request_param_rebuild_soon().
+    ///
+    /// On rebuild success:
+    /// - Updates the viewport with the mesh from the final feature's output
+    /// - Clears rebuild_pending_since
+    /// - Sets status_message to "Parametric rebuild complete"
+    ///
+    /// On rebuild failure:
+    /// - Sets status_message to describe the error (error nodes remain in the document)
+    /// - Does NOT clear rebuild_pending_since (caller may retry)
+    ///
+    /// This method should be called once per update() cycle to integrate parametric
+    /// rebuilds into the app's UI update loop.
     #[allow(dead_code)]
     fn perform_param_rebuild_if_due(&mut self) {
         const REBUILD_DEBOUNCE_MS: u128 = 100;

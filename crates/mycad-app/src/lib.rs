@@ -24,6 +24,7 @@ const SKETCH_POINT_COLOR: [f32; 4] = [1.0, 0.8, 0.2, 1.0];
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SketchTool {
     None,
+    Point,
     Line,
     Rectangle,
     Circle,
@@ -669,6 +670,22 @@ impl MyCadApp {
                 return;
             }
 
+            // Point tool: single click to place point
+            if *tool == SketchTool::Point && response.clicked {
+                if let Some(snapped) = *snapped_point {
+                    undo_stack.push(local_sketch.clone());
+                    redo_stack.clear();
+                    local_sketch.add_entity(
+                        SketchGeometry::Point(mycad_kernel::sketch::SketchPoint {
+                            position: snapped,
+                        }),
+                        false,
+                        None,
+                    );
+                    should_rebuild = true;
+                }
+            }
+
             if *tool == SketchTool::Line && response.clicked {
                 if let Some(snapped) = *snapped_point {
                     if let Some(start) = *line_start {
@@ -1286,6 +1303,12 @@ impl eframe::App for MyCadApp {
                     // Exit parametric sketch without committing
                     self.exit_param_sketch_mode(false);
                 }
+                if i.key_pressed(egui::Key::P) && !i.modifiers.ctrl && !i.modifiers.shift {
+                    // Point tool
+                    if let Some(SubEditorState::Sketch { tool, .. }) = &mut self.sub_editor {
+                        *tool = SketchTool::Point;
+                    }
+                }
                 if i.key_pressed(egui::Key::L) && !i.modifiers.ctrl {
                     // Line tool
                     if let Some(SubEditorState::Sketch { tool, line_start, .. }) = &mut self.sub_editor {
@@ -1525,6 +1548,12 @@ impl eframe::App for MyCadApp {
                             ui.close_menu();
                         }
                     } else if in_param_sketch {
+                        if ui.button("Point Tool            P").clicked() {
+                            if let Some(SubEditorState::Sketch { tool, .. }) = &mut self.sub_editor {
+                                *tool = SketchTool::Point;
+                            }
+                            ui.close_menu();
+                        }
                         if ui.button("Line Tool              L").clicked() {
                             if let Some(SubEditorState::Sketch { tool, line_start, .. }) = &mut self.sub_editor {
                                 *tool = SketchTool::Line;
@@ -1672,6 +1701,7 @@ impl eframe::App for MyCadApp {
                         ui.separator();
                         let tool_label = match session.tool {
                             SketchTool::None => "Select",
+                            SketchTool::Point => "Point",
                             SketchTool::Line => "Line",
                             SketchTool::Rectangle => "Rectangle",
                             SketchTool::Circle => "Circle",

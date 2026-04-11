@@ -7,6 +7,8 @@ use mycad_kernel::features::{ExtrudeParams, extrude};
 use mycad_kernel::tessellation::tessellate_solid;
 use mycad_renderer::overlay::LineVertex;
 use mycad_renderer::{ProjectionMode, StandardView, Viewport3d, ViewportResponse};
+use mycad_kernel::parametric::types::{Document as ParamDocument, NodeId};
+use mycad_kernel::parametric::ops::extrude_op::ExtrudeOp;
 
 const SNAP_GRID_SIZE: Scalar = 1.0;
 const SNAP_POINT_THRESHOLD: Scalar = 0.3;
@@ -22,6 +24,39 @@ pub enum SketchTool {
     Rectangle,
     Circle,
     Arc,
+}
+
+/// Local editing state for sketches or extrude parameters within the document.
+pub enum SubEditorState {
+    Sketch {
+        node_id: NodeId,
+        local_sketch: Box<Sketch>,
+        undo_stack: Vec<Box<Sketch>>,
+        redo_stack: Vec<Box<Sketch>>,
+        tool: SketchTool,
+        hover_point: Option<Point2>,
+        snapped_point: Option<Point2>,
+        line_start: Option<Point2>,
+        rect_start: Option<Point2>,
+        circle_center: Option<Point2>,
+        arc_center: Option<Point2>,
+        arc_start: Option<Point2>,
+    },
+    ExtrudeParams {
+        node_id: NodeId,
+        pending: Box<ExtrudeOp>,
+        undo_stack: Vec<Box<ExtrudeOp>>,
+        redo_stack: Vec<Box<ExtrudeOp>>,
+    },
+}
+
+impl SubEditorState {
+    pub fn node_id(&self) -> NodeId {
+        match self {
+            Self::Sketch { node_id, .. } => *node_id,
+            Self::ExtrudeParams { node_id, .. } => *node_id,
+        }
+    }
 }
 
 pub struct SketchSession {
@@ -305,11 +340,16 @@ fn sketch_entity_points(entity: &SketchEntity) -> Vec<Point2> {
     }
 }
 
+#[allow(dead_code)]
 pub struct MyCadApp {
     viewport: Option<Viewport3d>,
     sketch_session: Option<SketchSession>,
     status_message: String,
     extrude_depth: Scalar,
+    // Parametric framework (migration in progress)
+    document: ParamDocument,
+    sub_editor: Option<SubEditorState>,
+    rebuild_pending_since: Option<std::time::Instant>,
 }
 
 impl MyCadApp {
@@ -319,6 +359,9 @@ impl MyCadApp {
             sketch_session: None,
             status_message: "Press S to enter Sketch mode".to_string(),
             extrude_depth: 5.0,
+            document: ParamDocument::new(),
+            sub_editor: None,
+            rebuild_pending_since: None,
         }
     }
 

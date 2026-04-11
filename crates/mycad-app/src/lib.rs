@@ -598,6 +598,8 @@ impl MyCadApp {
                 line_start,
                 rect_start,
                 circle_center,
+                arc_center,
+                arc_start,
                 ..
             }) = &mut self.sub_editor
             else {
@@ -654,6 +656,9 @@ impl MyCadApp {
                     *rect_start = None;
                 } else if circle_center.is_some() {
                     *circle_center = None;
+                } else if arc_center.is_some() || arc_start.is_some() {
+                    *arc_center = None;
+                    *arc_start = None;
                 } else {
                     *tool = SketchTool::None;
                 }
@@ -723,6 +728,37 @@ impl MyCadApp {
                         }
                     } else {
                         *circle_center = Some(snapped);
+                    }
+                }
+            }
+
+            // Arc tool: three clicks - center, start point, end point
+            if *tool == SketchTool::Arc && response.clicked {
+                if let Some(snapped) = *snapped_point {
+                    if let (Some(center), Some(start)) = (*arc_center, *arc_start) {
+                        let radius = center.distance(start);
+                        if radius > 1.0e-4 {
+                            let start_angle = (start.y - center.y).atan2(start.x - center.x);
+                            let end_angle = (snapped.y - center.y).atan2(snapped.x - center.x);
+                            local_sketch.add_entity(
+                                SketchGeometry::Arc(mycad_kernel::sketch::Arc {
+                                    center,
+                                    radius,
+                                    start_angle,
+                                    end_angle,
+                                }),
+                                false,
+                                None,
+                            );
+
+                            *arc_center = None;
+                            *arc_start = None;
+                            should_rebuild = true;
+                        }
+                    } else if arc_center.is_some() {
+                        *arc_start = Some(snapped);
+                    } else {
+                        *arc_center = Some(snapped);
                     }
                 }
             }
@@ -868,14 +904,60 @@ impl MyCadApp {
             snapped_point,
             ..
         }) = &self.sub_editor {
-            // Render parametric sketch lines
+            // Render parametric sketch entities
             let mut lines = Vec::new();
             for entity in &local_sketch.entities {
-                if let SketchGeometry::LineSegment(line) = &entity.geometry {
-                    lines.extend(LineVertex::new(
-                        [line.start.x as f32, line.start.y as f32, 0.0],
-                        [line.end.x as f32, line.end.y as f32, 0.0],
-                    ));
+                match &entity.geometry {
+                    SketchGeometry::LineSegment(line) => {
+                        lines.extend(LineVertex::new(
+                            [line.start.x as f32, line.start.y as f32, 0.0],
+                            [line.end.x as f32, line.end.y as f32, 0.0],
+                        ));
+                    }
+                    SketchGeometry::Circle(circle) => {
+                        // Draw circle as line segments (approximation)
+                        const CIRCLE_SEGMENTS: usize = 32;
+                        for i in 0..CIRCLE_SEGMENTS {
+                            let angle1 = 2.0 * std::f64::consts::PI * (i as f64) / (CIRCLE_SEGMENTS as f64);
+                            let angle2 = 2.0 * std::f64::consts::PI * ((i + 1) as f64) / (CIRCLE_SEGMENTS as f64);
+                            let p1 = Point2::new(
+                                circle.center.x + circle.radius * angle1.cos(),
+                                circle.center.y + circle.radius * angle1.sin(),
+                            );
+                            let p2 = Point2::new(
+                                circle.center.x + circle.radius * angle2.cos(),
+                                circle.center.y + circle.radius * angle2.sin(),
+                            );
+                            lines.extend(LineVertex::new(
+                                [p1.x as f32, p1.y as f32, 0.0],
+                                [p2.x as f32, p2.y as f32, 0.0],
+                            ));
+                        }
+                    }
+                    SketchGeometry::Arc(arc) => {
+                        // Draw arc as line segments (approximation)
+                        const ARC_SEGMENTS: usize = 16;
+                        let angle_diff = arc.end_angle - arc.start_angle;
+                        for i in 0..ARC_SEGMENTS {
+                            let t1 = i as f64 / ARC_SEGMENTS as f64;
+                            let t2 = (i + 1) as f64 / ARC_SEGMENTS as f64;
+                            let angle1 = arc.start_angle + angle_diff * t1;
+                            let angle2 = arc.start_angle + angle_diff * t2;
+                            let p1 = Point2::new(
+                                arc.center.x + arc.radius * angle1.cos(),
+                                arc.center.y + arc.radius * angle1.sin(),
+                            );
+                            let p2 = Point2::new(
+                                arc.center.x + arc.radius * angle2.cos(),
+                                arc.center.y + arc.radius * angle2.sin(),
+                            );
+                            lines.extend(LineVertex::new(
+                                [p1.x as f32, p1.y as f32, 0.0],
+                                [p2.x as f32, p2.y as f32, 0.0],
+                            ));
+                        }
+                    }
+                    _ => {}
                 }
             }
 
@@ -1161,6 +1243,14 @@ impl eframe::App for MyCadApp {
                         *circle_center = None;
                     }
                 }
+                if i.key_pressed(egui::Key::A) && !i.modifiers.ctrl {
+                    // Arc tool
+                    if let Some(SubEditorState::Sketch { tool, arc_center, arc_start, .. }) = &mut self.sub_editor {
+                        *tool = SketchTool::Arc;
+                        *arc_center = None;
+                        *arc_start = None;
+                    }
+                }
                 if i.key_pressed(egui::Key::Enter) {
                     // Enter = Commit parametric sketch
                     self.exit_param_sketch_mode(true);
@@ -1307,6 +1397,14 @@ impl eframe::App for MyCadApp {
                             if let Some(SubEditorState::Sketch { tool, circle_center, .. }) = &mut self.sub_editor {
                                 *tool = SketchTool::Circle;
                                 *circle_center = None;
+                            }
+                            ui.close_menu();
+                        }
+                        if ui.button("Arc Tool              A").clicked() {
+                            if let Some(SubEditorState::Sketch { tool, arc_center, arc_start, .. }) = &mut self.sub_editor {
+                                *tool = SketchTool::Arc;
+                                *arc_center = None;
+                                *arc_start = None;
                             }
                             ui.close_menu();
                         }

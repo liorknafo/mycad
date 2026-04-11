@@ -1318,6 +1318,50 @@ impl eframe::App for MyCadApp {
                         }
                     }
                 }
+                if i.key_pressed(egui::Key::H) && !i.modifiers.ctrl {
+                    // H = Apply horizontal constraint
+                    if let Some(SubEditorState::Sketch {
+                        local_sketch,
+                        selected_entity,
+                        ..
+                    }) = &mut self.sub_editor {
+                        if let Some(entity_id) = selected_entity {
+                            if let Some(entity) = local_sketch.entity(*entity_id) {
+                                if matches!(entity.geometry, SketchGeometry::LineSegment(_)) {
+                                    local_sketch.add_constraint(
+                                        mycad_kernel::sketch::SketchConstraintKind::Horizontal {
+                                            line: *entity_id,
+                                        },
+                                        None,
+                                    );
+                                    *selected_entity = None;
+                                }
+                            }
+                        }
+                    }
+                }
+                if i.key_pressed(egui::Key::V) && !i.modifiers.ctrl {
+                    // V = Apply vertical constraint
+                    if let Some(SubEditorState::Sketch {
+                        local_sketch,
+                        selected_entity,
+                        ..
+                    }) = &mut self.sub_editor {
+                        if let Some(entity_id) = selected_entity {
+                            if let Some(entity) = local_sketch.entity(*entity_id) {
+                                if matches!(entity.geometry, SketchGeometry::LineSegment(_)) {
+                                    local_sketch.add_constraint(
+                                        mycad_kernel::sketch::SketchConstraintKind::Vertical {
+                                            line: *entity_id,
+                                        },
+                                        None,
+                                    );
+                                    *selected_entity = None;
+                                }
+                            }
+                        }
+                    }
+                }
                 if i.key_pressed(egui::Key::Enter) {
                     // Enter = Commit parametric sketch
                     self.exit_param_sketch_mode(true);
@@ -1485,6 +1529,53 @@ impl eframe::App for MyCadApp {
                             self.perform_param_extrude(self.extrude_depth);
                             ui.close_menu();
                         }
+                        ui.separator();
+                        ui.menu_button("Constraints", |ui| {
+                            if ui.button("Horizontal          H").clicked() {
+                                if let Some(SubEditorState::Sketch {
+                                    local_sketch,
+                                    selected_entity,
+                                    ..
+                                }) = &mut self.sub_editor {
+                                    if let Some(entity_id) = selected_entity {
+                                        if let Some(entity) = local_sketch.entity(*entity_id) {
+                                            if matches!(entity.geometry, SketchGeometry::LineSegment(_)) {
+                                                local_sketch.add_constraint(
+                                                    mycad_kernel::sketch::SketchConstraintKind::Horizontal {
+                                                        line: *entity_id,
+                                                    },
+                                                    None,
+                                                );
+                                                *selected_entity = None;
+                                            }
+                                        }
+                                    }
+                                }
+                                ui.close_menu();
+                            }
+                            if ui.button("Vertical              V").clicked() {
+                                if let Some(SubEditorState::Sketch {
+                                    local_sketch,
+                                    selected_entity,
+                                    ..
+                                }) = &mut self.sub_editor {
+                                    if let Some(entity_id) = selected_entity {
+                                        if let Some(entity) = local_sketch.entity(*entity_id) {
+                                            if matches!(entity.geometry, SketchGeometry::LineSegment(_)) {
+                                                local_sketch.add_constraint(
+                                                    mycad_kernel::sketch::SketchConstraintKind::Vertical {
+                                                        line: *entity_id,
+                                                    },
+                                                    None,
+                                                );
+                                                *selected_entity = None;
+                                            }
+                                        }
+                                    }
+                                }
+                                ui.close_menu();
+                            }
+                        });
                         ui.separator();
                         if ui.button("Commit              Return").clicked() {
                             self.exit_param_sketch_mode(true);

@@ -1025,3 +1025,104 @@ impl eframe::App for MyCadApp {
         self.update_sketch_rendering();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_app() -> MyCadApp {
+        MyCadApp {
+            viewport: None,
+            sketch_session: None,
+            status_message: "Test app".to_string(),
+            extrude_depth: 5.0,
+            document: ParamDocument::new(),
+            sub_editor: None,
+            rebuild_pending_since: None,
+        }
+    }
+
+    #[test]
+    fn parametric_sketch_workflow() {
+        let mut app = create_test_app();
+
+        // Start a parametric sketch
+        app.start_param_sketch();
+        assert!(app.sub_editor.is_some(), "Should have created sub_editor");
+        assert!(app.document.nodes.len() > 1, "Should have created datum + sketch nodes");
+
+        // Get node_id before modifying
+        let sketch_node_id = if let Some(SubEditorState::Sketch { node_id, .. }) = &app.sub_editor {
+            *node_id
+        } else {
+            panic!("Expected sketch editing state");
+        };
+
+        // Modify the sketch
+        if let Some(SubEditorState::Sketch { local_sketch, .. }) = &mut app.sub_editor {
+            // Add a rectangle to the sketch
+            local_sketch.add_rectangle(Point2::new(0.0, 0.0), Point2::new(10.0, 5.0));
+            assert_eq!(
+                local_sketch.entities.len(),
+                4,
+                "Rectangle should have 4 line segments"
+            );
+        }
+
+        // Commit the changes
+        let commit_result = app.commit_param_sketch_edits();
+        assert!(commit_result.is_ok(), "Commit should succeed");
+
+        // Verify the sketch was updated in the document
+        let node = app.document.node(sketch_node_id);
+        assert!(node.is_ok(), "Node should exist after commit");
+        if let Ok(n) = node {
+            if let Operation::CreateSketch(sketch_op) = &n.operation {
+                assert_eq!(
+                    sketch_op.sketch.entities.len(),
+                    4,
+                    "Sketch in document should be updated"
+                );
+            }
+        }
+
+        // Request rebuild
+        app.request_param_rebuild_soon();
+        assert!(
+            app.rebuild_pending_since.is_some(),
+            "Should have rebuild scheduled"
+        );
+
+        // Wait a bit for debounce to expire
+        std::thread::sleep(std::time::Duration::from_millis(150));
+
+        // Perform rebuild
+        app.perform_param_rebuild_if_due();
+        assert!(
+            app.rebuild_pending_since.is_none(),
+            "Should have cleared rebuild flag after executing"
+        );
+    }
+
+    #[test]
+    fn cancel_sketch_edits() {
+        let mut app = create_test_app();
+
+        // Start a parametric sketch
+        app.start_param_sketch();
+        assert!(app.sub_editor.is_some());
+
+        // Modify the sketch
+        if let Some(SubEditorState::Sketch { local_sketch, .. }) = &mut app.sub_editor {
+            local_sketch.add_rectangle(Point2::new(0.0, 0.0), Point2::new(10.0, 5.0));
+        }
+
+        // Cancel without committing
+        app.cancel_param_sketch_edits();
+        assert!(app.sub_editor.is_none(), "Should have cleared sub_editor");
+        assert!(
+            app.rebuild_pending_since.is_none(),
+            "Should have cleared rebuild pending"
+        );
+    }
+}

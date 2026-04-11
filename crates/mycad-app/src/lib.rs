@@ -1442,6 +1442,25 @@ impl eframe::App for MyCadApp {
                         }
                     }
                 }
+                if i.key_pressed(egui::Key::G) && !i.modifiers.ctrl {
+                    // G = Toggle construction geometry
+                    if let Some(SubEditorState::Sketch {
+                        local_sketch,
+                        selected_entity,
+                        undo_stack,
+                        redo_stack,
+                        ..
+                    }) = &mut self.sub_editor {
+                        if let Some(&entity_id) = selected_entity.as_ref() {
+                            if let Some(entity) = local_sketch.entity_mut(entity_id) {
+                                entity.construction = !entity.construction;
+                            }
+                            undo_stack.push(local_sketch.clone());
+                            redo_stack.clear();
+                            self.request_param_rebuild_soon();
+                        }
+                    }
+                }
                 if i.key_pressed(egui::Key::Enter) {
                     // Enter = Commit parametric sketch
                     self.exit_param_sketch_mode(true);
@@ -1806,6 +1825,18 @@ impl eframe::App for MyCadApp {
                                 if let Some(name) = &entity.name {
                                     ui.label(format!("Name: {}", name));
                                 }
+
+                                let construction_text = if entity.construction {
+                                    "Construction (G to toggle)"
+                                } else {
+                                    "Normal (G to toggle)"
+                                };
+                                let construction_color = if entity.construction {
+                                    egui::Color32::from_rgb(180, 150, 100)
+                                } else {
+                                    egui::Color32::from_rgb(100, 200, 100)
+                                };
+                                ui.label(egui::RichText::new(construction_text).color(construction_color));
 
                                 ui.separator();
 

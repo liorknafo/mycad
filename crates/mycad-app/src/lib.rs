@@ -569,6 +569,7 @@ impl MyCadApp {
                 snapped_point,
                 line_start,
                 rect_start,
+                circle_center,
                 ..
             }) = &mut self.sub_editor
             else {
@@ -623,6 +624,8 @@ impl MyCadApp {
                     *line_start = None;
                 } else if rect_start.is_some() {
                     *rect_start = None;
+                } else if circle_center.is_some() {
+                    *circle_center = None;
                 } else {
                     *tool = SketchTool::None;
                 }
@@ -669,6 +672,29 @@ impl MyCadApp {
                         }
                     } else {
                         *rect_start = Some(snapped);
+                    }
+                }
+            }
+
+            if *tool == SketchTool::Circle && response.clicked {
+                if let Some(snapped) = *snapped_point {
+                    if let Some(center) = *circle_center {
+                        let radius = center.distance(snapped);
+                        if radius > 1.0e-4 {
+                            local_sketch.add_entity(
+                                SketchGeometry::Circle(mycad_kernel::sketch::Circle {
+                                    center,
+                                    radius,
+                                }),
+                                false,
+                                None,
+                            );
+
+                            *circle_center = None;
+                            should_rebuild = true;
+                        }
+                    } else {
+                        *circle_center = Some(snapped);
                     }
                 }
             }
@@ -1100,6 +1126,13 @@ impl eframe::App for MyCadApp {
                         *rect_start = None;
                     }
                 }
+                if i.key_pressed(egui::Key::C) && !i.modifiers.ctrl {
+                    // Circle tool
+                    if let Some(SubEditorState::Sketch { tool, circle_center, .. }) = &mut self.sub_editor {
+                        *tool = SketchTool::Circle;
+                        *circle_center = None;
+                    }
+                }
                 if i.key_pressed(egui::Key::Enter) {
                     // Enter = Commit parametric sketch
                     self.exit_param_sketch_mode(true);
@@ -1218,6 +1251,13 @@ impl eframe::App for MyCadApp {
                             if let Some(SubEditorState::Sketch { tool, rect_start, .. }) = &mut self.sub_editor {
                                 *tool = SketchTool::Rectangle;
                                 *rect_start = None;
+                            }
+                            ui.close_menu();
+                        }
+                        if ui.button("Circle Tool        C").clicked() {
+                            if let Some(SubEditorState::Sketch { tool, circle_center, .. }) = &mut self.sub_editor {
+                                *tool = SketchTool::Circle;
+                                *circle_center = None;
                             }
                             ui.close_menu();
                         }

@@ -10,5 +10,6 @@ pub mod document;
 pub mod errors;
 pub mod feature;
 pub mod naming;
+pub mod ops;
 pub mod rebuild;
 pub mod types;

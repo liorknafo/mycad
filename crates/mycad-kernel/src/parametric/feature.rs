@@ -172,18 +172,22 @@ pub enum Operation {
     /// simply re-emits the parent context, so chaining Noops is a no-op.
     #[doc(hidden)]
     Noop,
+    /// Create a datum plane (world XY/XZ/YZ for spec #1; offset/3-point/midplane in spec #2).
+    CreateDatumPlane(crate::parametric::ops::datum_plane::CreateDatumPlaneOp),
 }
 
 impl Feature for Operation {
     fn inputs(&self) -> Vec<InputRef> {
         match self {
             Self::Noop => vec![],
+            Self::CreateDatumPlane(op) => op.inputs(),
         }
     }
 
     fn build(&self, ctx: &BuildContext) -> Result<FeatureOutput, ParametricError> {
         match self {
             Self::Noop => Ok(ctx.parent.clone()),
+            Self::CreateDatumPlane(op) => op.build(ctx),
         }
     }
 }

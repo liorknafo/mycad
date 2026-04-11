@@ -1379,6 +1379,24 @@ impl eframe::App for MyCadApp {
                         }
                     }
                 }
+                if i.key_pressed(egui::Key::Delete) {
+                    // Delete = Remove selected entity
+                    if let Some(SubEditorState::Sketch {
+                        local_sketch,
+                        selected_entity,
+                        undo_stack,
+                        redo_stack,
+                        ..
+                    }) = &mut self.sub_editor {
+                        if let Some(entity_id) = selected_entity {
+                            undo_stack.push(local_sketch.clone());
+                            redo_stack.clear();
+                            local_sketch.remove_entity(*entity_id);
+                            *selected_entity = None;
+                            self.request_param_rebuild_soon();
+                        }
+                    }
+                }
                 if i.key_pressed(egui::Key::Enter) {
                     // Enter = Commit parametric sketch
                     self.exit_param_sketch_mode(true);

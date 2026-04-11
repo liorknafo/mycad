@@ -8,7 +8,7 @@ use mycad_kernel::tessellation::tessellate_solid;
 use mycad_renderer::overlay::LineVertex;
 use mycad_renderer::{ProjectionMode, StandardView, Viewport3d, ViewportResponse};
 use mycad_kernel::parametric::types::{Document as ParamDocument, NodeId};
-use mycad_kernel::parametric::ops::extrude_op::ExtrudeOp;
+use mycad_kernel::parametric::ops::extrude_op::{ExtrudeOp, ExtrudeDirection, ProfileRef};
 use mycad_kernel::parametric::ops::datum_plane::CreateDatumPlaneOp;
 use mycad_kernel::parametric::ops::sketch_op::CreateSketchOp;
 use mycad_kernel::parametric::feature::{InputRef, Operation, WorldRef};
@@ -433,6 +433,65 @@ impl MyCadApp {
         if let Some(viewport) = &mut self.viewport {
             viewport.clear_sketch_lines();
         }
+    }
+
+    /// Create an extrude operation on the most recent parametric sketch.
+    fn perform_param_extrude(&mut self, depth: Scalar) {
+        // Find the most recent sketch node (iterate in reverse insertion order)
+        let mut node_ids: Vec<_> = self.document.nodes.keys().copied().collect();
+        node_ids.reverse();
+
+        let sketch_node = node_ids.iter()
+            .find(|id| {
+                if let Ok(node) = self.document.node(**id) {
+                    matches!(node.operation, Operation::CreateSketch(_))
+                } else {
+                    false
+                }
+            })
+            .copied();
+
+        let Some(sketch_node_id) = sketch_node else {
+            self.status_message = "No parametric sketch found to extrude".to_string();
+            return;
+        };
+
+        // Get the sketch instance ID from the operation
+        let sketch_instance_id = if let Ok(node) = self.document.node(sketch_node_id) {
+            if let Operation::CreateSketch(op) = &node.operation {
+                op.id
+            } else {
+                self.status_message = "Expected CreateSketch operation".to_string();
+                return;
+            }
+        } else {
+            self.status_message = "Failed to find sketch node".to_string();
+            return;
+        };
+
+        // Create and append the extrude operation
+        let extrude_op = ExtrudeOp {
+            profile: ProfileRef {
+                producing_node: sketch_node_id,
+                sketch_id: sketch_instance_id,
+            },
+            depth,
+            direction: ExtrudeDirection::Up,
+        };
+
+        if let Err(e) = self.document.append_op(Operation::Extrude(extrude_op)) {
+            self.status_message = format!("Failed to create extrude: {:?}", e);
+            return;
+        }
+
+        // Mark the extrude node as needing build
+        let last_node = self.document.nodes.keys().last().copied();
+        if let Some(node_id) = last_node {
+            let _ = mark_dirty(&mut self.document, node_id);
+        }
+
+        self.request_param_rebuild_soon();
+        self.status_message = format!("Parametric extrude created (depth: {:.2}), rebuilding...", depth);
     }
 
     fn perform_extrude(&mut self, distance: Scalar) {
@@ -966,6 +1025,11 @@ impl eframe::App for MyCadApp {
                     // Enter = Commit parametric sketch
                     self.exit_param_sketch_mode(true);
                 }
+                if i.key_pressed(egui::Key::E) && !i.modifiers.ctrl {
+                    // E = Commit sketch and create extrude
+                    self.exit_param_sketch_mode(true);
+                    self.perform_param_extrude(self.extrude_depth);
+                }
             }
         });
         let in_sketch = self.is_sketch_mode();
@@ -1069,6 +1133,16 @@ impl eframe::App for MyCadApp {
                                 *tool = SketchTool::Rectangle;
                                 *rect_start = None;
                             }
+                            ui.close_menu();
+                        }
+                        ui.separator();
+                        ui.horizontal(|ui| {
+                            ui.label("Depth: ");
+                            ui.add(egui::DragValue::new(&mut self.extrude_depth).speed(0.5).range(0.1..=100.0));
+                        });
+                        if ui.button("Extrude & Commit  E").clicked() {
+                            self.exit_param_sketch_mode(true);
+                            self.perform_param_extrude(self.extrude_depth);
                             ui.close_menu();
                         }
                         ui.separator();

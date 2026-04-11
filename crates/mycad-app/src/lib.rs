@@ -383,6 +383,10 @@ impl MyCadApp {
         self.sketch_session.is_some()
     }
 
+    fn is_param_sketch_mode(&self) -> bool {
+        matches!(&self.sub_editor, Some(SubEditorState::Sketch { .. }))
+    }
+
     fn projection_label(&self) -> &'static str {
         match self.viewport.as_ref().map(|v| v.camera().projection) {
             Some(ProjectionMode::Orthographic) => "ortho",
@@ -413,6 +417,22 @@ impl MyCadApp {
             viewport.clear_sketch_lines();
         }
         self.status_message = "Press S to enter Sketch mode".to_string();
+    }
+
+    fn exit_param_sketch_mode(&mut self, commit: bool) {
+        if commit {
+            if let Err(e) = self.commit_param_sketch_edits() {
+                self.status_message = format!("Failed to commit: {}", e);
+                return;
+            }
+            self.status_message = "Parametric sketch committed, rebuilding...".to_string();
+        } else {
+            self.cancel_param_sketch_edits();
+            self.status_message = "Parametric sketch cancelled".to_string();
+        }
+        if let Some(viewport) = &mut self.viewport {
+            viewport.clear_sketch_lines();
+        }
     }
 
     fn perform_extrude(&mut self, distance: Scalar) {
@@ -475,6 +495,71 @@ impl MyCadApp {
             }
             Err(e) => {
                 self.status_message = format!("Extrude error: {}", e);
+            }
+        }
+    }
+
+    fn handle_param_sketch_input(&mut self, response: &ViewportResponse) {
+        let Some(SubEditorState::Sketch {
+            local_sketch,
+            tool,
+            hover_point,
+            snapped_point,
+            line_start,
+            rect_start,
+            ..
+        }) = &mut self.sub_editor
+        else {
+            return;
+        };
+
+        let Some(viewport) = &self.viewport else { return };
+
+        if let Some(hover_pos) = response.hover_pos {
+            let rect = viewport.last_rect();
+            if let Some(sketch_pt) = viewport.screen_to_sketch_point(hover_pos, rect, &local_sketch.plane) {
+                *hover_point = Some(sketch_pt);
+
+                // Simple snapping: just snap to grid for now
+                let snapped = Point2::new(
+                    (sketch_pt.x / SNAP_GRID_SIZE).round() * SNAP_GRID_SIZE,
+                    (sketch_pt.y / SNAP_GRID_SIZE).round() * SNAP_GRID_SIZE,
+                );
+                *snapped_point = Some(snapped);
+            }
+        }
+
+        if response.escape_pressed {
+            if line_start.is_some() {
+                *line_start = None;
+            } else if rect_start.is_some() {
+                *rect_start = None;
+            } else {
+                *tool = SketchTool::None;
+            }
+            return;
+        }
+
+        if *tool == SketchTool::Rectangle && response.clicked {
+            if let Some(snapped) = *snapped_point {
+                if let Some(start) = *rect_start {
+                    if start.distance(snapped) > 1.0e-4 {
+                        let min_x = start.x.min(snapped.x);
+                        let min_y = start.y.min(snapped.y);
+                        let max_x = start.x.max(snapped.x);
+                        let max_y = start.y.max(snapped.y);
+
+                        local_sketch.add_rectangle(
+                            Point2::new(min_x, min_y),
+                            Point2::new(max_x, max_y),
+                        );
+
+                        *rect_start = None;
+                        self.request_param_rebuild_soon();
+                    }
+                } else {
+                    *rect_start = Some(snapped);
+                }
             }
         }
     }
@@ -608,6 +693,18 @@ impl MyCadApp {
         let Some(viewport) = &mut self.viewport else { return };
         if let Some(session) = &self.sketch_session {
             viewport.set_sketch_lines(session.build_sketch_lines());
+        } else if let Some(SubEditorState::Sketch { local_sketch, .. }) = &self.sub_editor {
+            // Render parametric sketch lines
+            let mut lines = Vec::new();
+            for entity in &local_sketch.entities {
+                if let SketchGeometry::LineSegment(line) = &entity.geometry {
+                    lines.extend(LineVertex::new(
+                        [line.start.x as f32, line.start.y as f32, 0.0],
+                        [line.end.x as f32, line.end.y as f32, 0.0],
+                    ));
+                }
+            }
+            viewport.set_sketch_lines(lines);
         } else {
             viewport.clear_sketch_lines();
         }
@@ -781,12 +878,22 @@ impl MyCadApp {
 impl eframe::App for MyCadApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let in_sketch = self.is_sketch_mode();
+        let in_param_sketch = self.is_param_sketch_mode();
+
+        // Deferred rebuild check
+        self.perform_param_rebuild_if_due();
 
         // Global keybindings
         ctx.input(|i| {
-            if i.key_pressed(egui::Key::S) && !i.modifiers.ctrl && !i.modifiers.shift && !in_sketch {
+            // Legacy sketch mode: S
+            if i.key_pressed(egui::Key::S) && !i.modifiers.ctrl && !i.modifiers.shift && !in_sketch && !in_param_sketch {
                 self.enter_sketch_mode();
             }
+            // Parametric sketch mode: Shift+P
+            if i.key_pressed(egui::Key::P) && i.modifiers.shift && !in_sketch && !in_param_sketch {
+                self.start_param_sketch();
+            }
+
             if in_sketch {
                 if i.key_pressed(egui::Key::Escape) {
                     // Escape is also handled in viewport for line cancel,
@@ -842,6 +949,24 @@ impl eframe::App for MyCadApp {
                     self.perform_extrude(self.extrude_depth);
                 }
             }
+
+            if in_param_sketch {
+                if i.key_pressed(egui::Key::Escape) {
+                    // Exit parametric sketch without committing
+                    self.exit_param_sketch_mode(false);
+                }
+                if i.key_pressed(egui::Key::R) && !i.modifiers.ctrl {
+                    // Rectangle tool
+                    if let Some(SubEditorState::Sketch { tool, rect_start, .. }) = &mut self.sub_editor {
+                        *tool = SketchTool::Rectangle;
+                        *rect_start = None;
+                    }
+                }
+                if i.key_pressed(egui::Key::Enter) {
+                    // Enter = Commit parametric sketch
+                    self.exit_param_sketch_mode(true);
+                }
+            }
         });
         let in_sketch = self.is_sketch_mode();
 
@@ -872,12 +997,17 @@ impl eframe::App for MyCadApp {
                     }
                 });
                 ui.menu_button("Sketch", |ui| {
-                    if !in_sketch {
+                    if !in_sketch && !in_param_sketch {
                         if ui.button("New Sketch (XY)    S").clicked() {
                             self.enter_sketch_mode();
                             ui.close_menu();
                         }
-                    } else {
+                        ui.separator();
+                        if ui.button("New Parametric Sketch (Exp)  Shift+P").clicked() {
+                            self.start_param_sketch();
+                            ui.close_menu();
+                        }
+                    } else if in_sketch {
                         if ui.button("Line Tool              L").clicked() {
                             if let Some(session) = &mut self.sketch_session {
                                 session.tool = SketchTool::Line;
@@ -931,6 +1061,23 @@ impl eframe::App for MyCadApp {
                         ui.separator();
                         if ui.button("Exit Sketch        Esc").clicked() {
                             self.exit_sketch_mode();
+                            ui.close_menu();
+                        }
+                    } else if in_param_sketch {
+                        if ui.button("Rectangle Tool    R").clicked() {
+                            if let Some(SubEditorState::Sketch { tool, rect_start, .. }) = &mut self.sub_editor {
+                                *tool = SketchTool::Rectangle;
+                                *rect_start = None;
+                            }
+                            ui.close_menu();
+                        }
+                        ui.separator();
+                        if ui.button("Commit              Return").clicked() {
+                            self.exit_param_sketch_mode(true);
+                            ui.close_menu();
+                        }
+                        if ui.button("Cancel              Esc").clicked() {
+                            self.exit_param_sketch_mode(false);
                             ui.close_menu();
                         }
                     }
@@ -1065,7 +1212,11 @@ impl eframe::App for MyCadApp {
             .inner;
 
         if let Some(response) = viewport_response {
-            self.handle_sketch_input(&response);
+            if in_param_sketch {
+                self.handle_param_sketch_input(&response);
+            } else {
+                self.handle_sketch_input(&response);
+            }
         }
         self.update_sketch_rendering();
     }

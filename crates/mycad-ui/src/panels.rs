@@ -5,6 +5,8 @@ use mycad_kernel::sketch::{
     ConstraintState, Sketch, SketchConstraintKind,
     SketchSolveResult,
 };
+use mycad_kernel::parametric::types::Document;
+use mycad_kernel::parametric::feature::Operation;
 
 /// Show the feature tree panel with entities and constraints
 pub fn feature_tree_panel(ui: &mut egui::Ui, sketch: &Sketch, solve_result: &SketchSolveResult) {
@@ -155,5 +157,86 @@ pub fn solver_status_panel(ui: &mut egui::Ui, result: &SketchSolveResult) {
 
     if let Some(ref error) = result.error {
         ui.label(egui::RichText::new(format!("Error: {:?}", error)).color(egui::Color32::RED));
+    }
+}
+
+/// Show the parametric feature tree from a document.
+pub fn parametric_feature_tree_panel(ui: &mut egui::Ui, document: &Document) {
+    ui.heading("History");
+    ui.separator();
+
+    let mut features = Vec::new();
+    for (node_id, node) in &document.nodes {
+        if node.parent != Some(document.root_node) {
+            continue; // Skip non-root children for now (single-component view)
+        }
+
+        let (op_type, name, status_color) = match &node.operation {
+            Operation::Noop => ("Root".to_string(), "Root".to_string(), egui::Color32::GRAY),
+            Operation::CreateDatumPlane(op) => {
+                (
+                    "Datum".to_string(),
+                    op.name.clone(),
+                    if node.error.is_some() {
+                        egui::Color32::from_rgb(255, 100, 100)
+                    } else if node.dirty {
+                        egui::Color32::from_rgb(255, 200, 100)
+                    } else {
+                        egui::Color32::from_rgb(100, 255, 100)
+                    },
+                )
+            }
+            Operation::CreateSketch(op) => {
+                let entity_count = node
+                    .cached_output
+                    .as_ref()
+                    .and_then(|out| out.sketches.first())
+                    .map(|sketch_entry| sketch_entry.sketch.entities.len())
+                    .unwrap_or(0);
+
+                let name = format!("{} ({} entities)", op.name, entity_count);
+                (
+                    "Sketch".to_string(),
+                    name,
+                    if node.error.is_some() {
+                        egui::Color32::from_rgb(255, 100, 100)
+                    } else if node.dirty {
+                        egui::Color32::from_rgb(255, 200, 100)
+                    } else {
+                        egui::Color32::from_rgb(100, 255, 100)
+                    },
+                )
+            }
+            Operation::Extrude(op) => {
+                let depth = op.depth;
+                (
+                    "Extrude".to_string(),
+                    format!("Extrude (depth: {:.2})", depth),
+                    if node.error.is_some() {
+                        egui::Color32::from_rgb(255, 100, 100)
+                    } else if node.dirty {
+                        egui::Color32::from_rgb(255, 200, 100)
+                    } else {
+                        egui::Color32::from_rgb(100, 255, 100)
+                    },
+                )
+            }
+        };
+
+        features.push((node_id, op_type, name, status_color, node.error.clone()));
+    }
+
+    if features.is_empty() {
+        ui.label("(empty)");
+    }
+
+    for (_, op_type, name, status_color, error) in features {
+        ui.horizontal(|ui| {
+            ui.colored_label(status_color, "●");
+            ui.label(format!("{}: {}", op_type, name));
+            if error.is_some() {
+                ui.label(egui::RichText::new("⚠").color(egui::Color32::RED));
+            }
+        });
     }
 }

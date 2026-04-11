@@ -978,11 +978,17 @@ impl eframe::App for MyCadApp {
         egui::SidePanel::left("feature_tree")
             .default_width(200.0)
             .show(ctx, |ui| {
-                ui.heading("Features");
-                ui.separator();
-                if let Some(session) = &self.sketch_session {
+                // Show parametric feature tree if document has features
+                let has_features = self.document.nodes.len() > 1; // More than just root
+                if has_features {
+                    mycad_ui::panels::parametric_feature_tree_panel(ui, &self.document);
+                } else if let Some(session) = &self.sketch_session {
+                    ui.heading("Features");
+                    ui.separator();
                     ui.label(format!("Sketch ({} entities)", session.sketch.entities.len()));
                 } else {
+                    ui.heading("Features");
+                    ui.separator();
                     ui.label("(empty)");
                 }
             });

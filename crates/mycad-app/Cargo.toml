@@ -1,0 +1,19 @@
+[package]
+name = "mycad-app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+mycad-kernel = { workspace = true }
+mycad-renderer = { workspace = true }
+mycad-ui = { workspace = true }
+eframe = { workspace = true }
+egui = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Window", "Document", "HtmlCanvasElement", "Element"] }

@@ -1,0 +1,18 @@
+/target
+/dist
+Cargo.lock
+*.wasm
+*.js
+!/index.html
+.trunk
+
+# Hierarchical agent plans
+.hier/
+
+# Tool state (per CLAUDE.md — not part of the project)
+.cargo/
+.pi/
+.claude/
+
+# Stray directory from an earlier mkdir error
+/-p/

@@ -1,0 +1,13 @@
+[package]
+name = "mycad-renderer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+mycad-kernel = { workspace = true }
+wgpu = { workspace = true }
+glam = { workspace = true }
+egui = { workspace = true }
+eframe = { workspace = true }
+bytemuck = { workspace = true }
+log = { workspace = true }

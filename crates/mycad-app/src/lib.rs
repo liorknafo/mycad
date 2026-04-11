@@ -1635,6 +1635,22 @@ impl eframe::App for MyCadApp {
                             ui.close_menu();
                         }
                         ui.separator();
+                        ui.separator();
+                        if ui.button("Clear Sketch").clicked() {
+                            if let Some(SubEditorState::Sketch {
+                                local_sketch,
+                                undo_stack,
+                                redo_stack,
+                                ..
+                            }) = &mut self.sub_editor {
+                                undo_stack.push(local_sketch.clone());
+                                redo_stack.clear();
+                                local_sketch.entities.clear();
+                                local_sketch.constraints.clear();
+                                self.request_param_rebuild_soon();
+                            }
+                            ui.close_menu();
+                        }
                         ui.menu_button("Constraints", |ui| {
                             if ui.button("Horizontal          H").clicked() {
                                 if let Some(SubEditorState::Sketch {

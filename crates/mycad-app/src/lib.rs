@@ -952,6 +952,23 @@ impl MyCadApp {
         }) = &self.sub_editor {
             // Render parametric sketch entities
             let mut lines = Vec::new();
+
+            // Render grid (background grid to aid alignment)
+            const GRID_RANGE: f64 = 20.0;
+            for i in -20..=20 {
+                let pos = (i as f64) * SNAP_GRID_SIZE;
+                // Vertical grid lines
+                lines.extend(LineVertex::new(
+                    [pos as f32, -GRID_RANGE as f32, 0.0],
+                    [pos as f32, GRID_RANGE as f32, 0.0],
+                ));
+                // Horizontal grid lines
+                lines.extend(LineVertex::new(
+                    [-GRID_RANGE as f32, pos as f32, 0.0],
+                    [GRID_RANGE as f32, pos as f32, 0.0],
+                ));
+            }
+
             for entity in &local_sketch.entities {
                 match &entity.geometry {
                     SketchGeometry::LineSegment(line) => {

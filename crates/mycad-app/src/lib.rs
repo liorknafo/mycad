@@ -1097,9 +1097,20 @@ impl MyCadApp {
     /// that will eventually replace it.
     #[allow(dead_code)]
     fn start_param_sketch(&mut self) {
-        // Create a datum plane operation on the world XY plane.
+        self.start_param_sketch_on_plane(WorldRef::PlaneXY);
+    }
+
+    fn start_param_sketch_on_plane(&mut self, world_ref: WorldRef) {
+        let (plane_name, plane) = match world_ref {
+            WorldRef::PlaneXY => ("XY", Plane::xy()),
+            WorldRef::PlaneXZ => ("XZ", Plane::xz()),
+            WorldRef::PlaneYZ => ("YZ", Plane::yz()),
+            _ => ("XY", Plane::xy()),
+        };
+
+        // Create a datum plane operation on the specified world plane.
         let datum_result = self.document.append_op(Operation::CreateDatumPlane(
-            CreateDatumPlaneOp::world(WorldRef::PlaneXY, "XY"),
+            CreateDatumPlaneOp::world(world_ref, plane_name),
         ));
 
         if datum_result.is_err() {
@@ -1108,9 +1119,9 @@ impl MyCadApp {
         }
 
         // Create a sketch on that datum plane.
-        let sketch = Sketch::world_xy();
+        let sketch = Sketch::new(plane);
         let sketch_op = CreateSketchOp::on_datum_plane(
-            InputRef::World(WorldRef::PlaneXY),
+            InputRef::World(world_ref),
             sketch.clone(),
             "Sketch",
         );
@@ -1134,7 +1145,7 @@ impl MyCadApp {
                 solver_result: None,
             });
             self.rebuild_pending_since = Some(std::time::Instant::now());
-            self.status_message = "Parametric sketch started (experimental)".to_string();
+            self.status_message = format!("Parametric sketch started on {} plane", plane_name);
         } else {
             self.status_message = "Failed to create sketch".to_string();
         }
@@ -1536,10 +1547,20 @@ impl eframe::App for MyCadApp {
                             ui.close_menu();
                         }
                         ui.separator();
-                        if ui.button("New Parametric Sketch (Exp)  Shift+P").clicked() {
-                            self.start_param_sketch();
-                            ui.close_menu();
-                        }
+                        ui.menu_button("New Parametric Sketch", |ui| {
+                            if ui.button("On XY plane        Shift+P").clicked() {
+                                self.start_param_sketch_on_plane(WorldRef::PlaneXY);
+                                ui.close_menu();
+                            }
+                            if ui.button("On XZ plane").clicked() {
+                                self.start_param_sketch_on_plane(WorldRef::PlaneXZ);
+                                ui.close_menu();
+                            }
+                            if ui.button("On YZ plane").clicked() {
+                                self.start_param_sketch_on_plane(WorldRef::PlaneYZ);
+                                ui.close_menu();
+                            }
+                        });
                     } else if in_sketch {
                         if ui.button("Line Tool              L").clicked() {
                             if let Some(session) = &mut self.sketch_session {

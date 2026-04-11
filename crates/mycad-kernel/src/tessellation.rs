@@ -2,9 +2,10 @@
 
 use crate::brep::{BRepError, BRepId, BRepModel};
 use crate::math::{point_on_plane_to_3d, project_point_to_plane, Point2, Point3, EPSILON};
+use serde::{Deserialize, Serialize};
 
 /// Triangle mesh representation with 3D vertices and triangle indices.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Mesh {
     /// 3D vertex positions.
     pub vertices: Vec<Point3>,

@@ -176,6 +176,8 @@ pub enum Operation {
     CreateDatumPlane(crate::parametric::ops::datum_plane::CreateDatumPlaneOp),
     /// Create a sketch on a host datum plane.
     CreateSketch(Box<crate::parametric::ops::sketch_op::CreateSketchOp>),
+    /// Extrude a closed loop from a sketch.
+    Extrude(crate::parametric::ops::extrude_op::ExtrudeOp),
 }
 
 impl Feature for Operation {
@@ -184,6 +186,7 @@ impl Feature for Operation {
             Self::Noop => vec![],
             Self::CreateDatumPlane(op) => op.inputs(),
             Self::CreateSketch(op) => op.as_ref().inputs(),
+            Self::Extrude(op) => op.inputs(),
         }
     }
 
@@ -192,6 +195,7 @@ impl Feature for Operation {
             Self::Noop => Ok(ctx.parent.clone()),
             Self::CreateDatumPlane(op) => op.build(ctx),
             Self::CreateSketch(op) => op.as_ref().build(ctx),
+            Self::Extrude(op) => op.build(ctx),
         }
     }
 }

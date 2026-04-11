@@ -1051,6 +1051,28 @@ impl MyCadApp {
                 }
             }
 
+            // Show snap indicator circle at snapped point
+            if let Some(snapped) = snapped_point {
+                const SNAP_INDICATOR_RADIUS: f64 = 0.3;
+                const SNAP_INDICATOR_SEGMENTS: usize = 16;
+                for i in 0..SNAP_INDICATOR_SEGMENTS {
+                    let angle1 = 2.0 * std::f64::consts::PI * (i as f64) / (SNAP_INDICATOR_SEGMENTS as f64);
+                    let angle2 = 2.0 * std::f64::consts::PI * ((i + 1) as f64) / (SNAP_INDICATOR_SEGMENTS as f64);
+                    let p1 = Point2::new(
+                        snapped.x + SNAP_INDICATOR_RADIUS * angle1.cos(),
+                        snapped.y + SNAP_INDICATOR_RADIUS * angle1.sin(),
+                    );
+                    let p2 = Point2::new(
+                        snapped.x + SNAP_INDICATOR_RADIUS * angle2.cos(),
+                        snapped.y + SNAP_INDICATOR_RADIUS * angle2.sin(),
+                    );
+                    lines.extend(LineVertex::new(
+                        [p1.x as f32, p1.y as f32, 0.0],
+                        [p2.x as f32, p2.y as f32, 0.0],
+                    ));
+                }
+            }
+
             viewport.set_sketch_lines(lines);
         } else {
             viewport.clear_sketch_lines();

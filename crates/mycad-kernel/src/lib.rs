@@ -4,3 +4,4 @@ pub mod brep;
 pub mod features;
 pub mod tessellation;
 pub mod export;
+pub mod parametric;

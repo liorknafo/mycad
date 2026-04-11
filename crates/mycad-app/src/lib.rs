@@ -57,6 +57,7 @@ pub enum SubEditorState {
         arc_center: Option<Point2>,
         arc_start: Option<Point2>,
         selected_entity: Option<SketchEntityId>,
+        solver_result: Option<Box<mycad_kernel::sketch::SketchSolveResult>>,
     },
     ExtrudeParams {
         node_id: NodeId,
@@ -605,6 +606,7 @@ impl MyCadApp {
                 undo_stack,
                 redo_stack,
                 selected_entity,
+                solver_result,
                 ..
             }) = &mut self.sub_editor
             else {
@@ -824,6 +826,11 @@ impl MyCadApp {
 
                     *selected_entity = closest_entity;
                 }
+            }
+
+            // Run sketch solver if sketch was modified
+            if should_rebuild {
+                *solver_result = Some(Box::new(local_sketch.solve()));
             }
         }
 
@@ -1124,6 +1131,7 @@ impl MyCadApp {
                 arc_center: None,
                 arc_start: None,
                 selected_entity: None,
+                solver_result: None,
             });
             self.rebuild_pending_since = Some(std::time::Instant::now());
             self.status_message = "Parametric sketch started (experimental)".to_string();
@@ -1832,12 +1840,44 @@ impl eframe::App for MyCadApp {
                     if let Some(SubEditorState::Sketch {
                         local_sketch,
                         selected_entity,
+                        solver_result,
                         ..
                     }) = &self.sub_editor {
                         // Show sketch statistics at top
                         ui.label(egui::RichText::new("Sketch Statistics").strong());
                         ui.label(format!("Entities: {}", local_sketch.entities.len()));
                         ui.label(format!("Constraints: {}", local_sketch.constraints().count()));
+
+                        // Show solver status
+                        if let Some(result) = solver_result {
+                            let (status_text, status_color) = match result.status {
+                                mycad_kernel::sketch::SketchSolveStatus::Converged => {
+                                    ("Converged", egui::Color32::from_rgb(100, 255, 100))
+                                }
+                                mycad_kernel::sketch::SketchSolveStatus::MaxIterationsReached => {
+                                    ("Max iters", egui::Color32::from_rgb(255, 200, 100))
+                                }
+                                mycad_kernel::sketch::SketchSolveStatus::Failed => {
+                                    ("Failed", egui::Color32::from_rgb(255, 100, 100))
+                                }
+                            };
+                            ui.horizontal(|ui| {
+                                ui.label("Solver:");
+                                ui.colored_label(status_color, status_text);
+                            });
+                            if let Some(dof) = result.dof {
+                                let dof_color = if dof == 0 {
+                                    egui::Color32::from_rgb(100, 255, 100)
+                                } else {
+                                    egui::Color32::from_rgb(255, 200, 100)
+                                };
+                                ui.horizontal(|ui| {
+                                    ui.label("DOF:");
+                                    ui.colored_label(dof_color, format!("{}", dof));
+                                });
+                            }
+                        }
+
                         ui.separator();
 
                         if let Some(entity_id) = selected_entity {

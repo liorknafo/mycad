@@ -1150,9 +1150,11 @@ impl MyCadApp {
         let sketch_result = self.document.append_op(Operation::CreateSketch(Box::new(sketch_op)));
 
         if let Ok(sketch_node) = sketch_result {
+            let mut local_sketch = Box::new(sketch);
+            let initial_solve = Some(Box::new(local_sketch.solve()));
             self.sub_editor = Some(SubEditorState::Sketch {
                 node_id: sketch_node,
-                local_sketch: Box::new(sketch),
+                local_sketch,
                 undo_stack: Vec::new(),
                 redo_stack: Vec::new(),
                 tool: SketchTool::None,
@@ -1164,7 +1166,7 @@ impl MyCadApp {
                 arc_center: None,
                 arc_start: None,
                 selected_entity: None,
-                solver_result: None,
+                solver_result: initial_solve,
             });
             self.rebuild_pending_since = Some(std::time::Instant::now());
             self.status_message = format!("Parametric sketch started on {} plane", plane_name);

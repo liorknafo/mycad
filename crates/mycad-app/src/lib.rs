@@ -977,6 +977,28 @@ impl MyCadApp {
             // Render parametric sketch entities
             let mut lines = Vec::new();
 
+            // Render origin axis markers (prominent X and Y axes)
+            const ORIGIN_AXIS_LENGTH: f32 = 2.5;
+            // X axis (positive direction only)
+            lines.extend(LineVertex::new(
+                [0.0, 0.0, 0.0],
+                [ORIGIN_AXIS_LENGTH, 0.0, 0.0],
+            ));
+            // Y axis (positive direction only)
+            lines.extend(LineVertex::new(
+                [0.0, 0.0, 0.0],
+                [0.0, ORIGIN_AXIS_LENGTH, 0.0],
+            ));
+            // Small crosshair at origin for visibility
+            lines.extend(LineVertex::new(
+                [-0.3, 0.0, 0.0],
+                [0.3, 0.0, 0.0],
+            ));
+            lines.extend(LineVertex::new(
+                [0.0, -0.3, 0.0],
+                [0.0, 0.3, 0.0],
+            ));
+
             // Render grid (background grid to aid alignment)
             const GRID_RANGE: f64 = 20.0;
             for i in -20..=20 {

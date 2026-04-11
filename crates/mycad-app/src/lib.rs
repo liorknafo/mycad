@@ -435,6 +435,34 @@ impl MyCadApp {
         }
     }
 
+    /// Save the parametric document to a JSON file.
+    fn save_param_document(&mut self, path: &str) -> Result<(), String> {
+        let json = serde_json::to_string_pretty(&self.document)
+            .map_err(|e| format!("Serialization failed: {}", e))?;
+
+        std::fs::write(path, json)
+            .map_err(|e| format!("Failed to write file: {}", e))?;
+
+        self.status_message = format!("Document saved to: {}", path);
+        Ok(())
+    }
+
+    /// Load a parametric document from a JSON file.
+    fn load_param_document(&mut self, path: &str) -> Result<(), String> {
+        let contents = std::fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read file: {}", e))?;
+
+        let document = serde_json::from_str(&contents)
+            .map_err(|e| format!("Deserialization failed: {}", e))?;
+
+        self.document = document;
+        self.sub_editor = None;
+        self.rebuild_pending_since = None;
+
+        self.status_message = format!("Document loaded from: {}", path);
+        Ok(())
+    }
+
     /// Create an extrude operation on the most recent parametric sketch.
     fn perform_param_extrude(&mut self, depth: Scalar) {
         // Find the most recent sketch node (iterate in reverse insertion order)
@@ -1151,12 +1179,33 @@ impl eframe::App for MyCadApp {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("File", |ui| {
                     if ui.button("New").clicked() {
+                        self.document = ParamDocument::new();
+                        self.sub_editor = None;
+                        self.rebuild_pending_since = None;
+                        if let Some(viewport) = &mut self.viewport {
+                            viewport.clear_mesh();
+                            viewport.clear_sketch_lines();
+                        }
+                        self.status_message = "New document created".to_string();
                         ui.close_menu();
                     }
-                    if ui.button("Open").clicked() {
+                    if ui.button("Open...").clicked() {
+                        // For now, use a default filename
+                        match self.load_param_document("mycad_document.json") {
+                            Ok(_) => {
+                                self.request_param_rebuild_soon();
+                            }
+                            Err(e) => {
+                                self.status_message = e;
+                            }
+                        }
                         ui.close_menu();
                     }
-                    if ui.button("Save").clicked() {
+                    if ui.button("Save...").clicked() {
+                        // For now, use a default filename
+                        if let Err(e) = self.save_param_document("mycad_document.json") {
+                            self.status_message = e;
+                        }
                         ui.close_menu();
                     }
                     ui.separator();

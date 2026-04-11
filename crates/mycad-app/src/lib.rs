@@ -1168,6 +1168,17 @@ impl MyCadApp {
             });
             self.rebuild_pending_since = Some(std::time::Instant::now());
             self.status_message = format!("Parametric sketch started on {} plane", plane_name);
+
+            // Auto-switch viewport to appropriate view for the sketch plane
+            if let Some(viewport) = &mut self.viewport {
+                let view = match world_ref {
+                    WorldRef::PlaneXY => StandardView::Top,
+                    WorldRef::PlaneXZ => StandardView::Front,
+                    WorldRef::PlaneYZ => StandardView::Right,
+                    _ => StandardView::Top,
+                };
+                viewport.set_standard_view(view);
+            }
         } else {
             self.status_message = "Failed to create sketch".to_string();
         }

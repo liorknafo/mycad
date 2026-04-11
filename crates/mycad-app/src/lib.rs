@@ -559,67 +559,123 @@ impl MyCadApp {
     }
 
     fn handle_param_sketch_input(&mut self, response: &ViewportResponse) {
-        let Some(SubEditorState::Sketch {
-            local_sketch,
-            tool,
-            hover_point,
-            snapped_point,
-            line_start,
-            rect_start,
-            ..
-        }) = &mut self.sub_editor
-        else {
-            return;
-        };
+        let mut should_rebuild = false;
 
-        let Some(viewport) = &self.viewport else { return };
+        {
+            let Some(SubEditorState::Sketch {
+                local_sketch,
+                tool,
+                hover_point,
+                snapped_point,
+                line_start,
+                rect_start,
+                ..
+            }) = &mut self.sub_editor
+            else {
+                return;
+            };
 
-        if let Some(hover_pos) = response.hover_pos {
-            let rect = viewport.last_rect();
-            if let Some(sketch_pt) = viewport.screen_to_sketch_point(hover_pos, rect, &local_sketch.plane) {
-                *hover_point = Some(sketch_pt);
+            let Some(viewport) = &self.viewport else { return };
 
-                // Simple snapping: just snap to grid for now
-                let snapped = Point2::new(
-                    (sketch_pt.x / SNAP_GRID_SIZE).round() * SNAP_GRID_SIZE,
-                    (sketch_pt.y / SNAP_GRID_SIZE).round() * SNAP_GRID_SIZE,
-                );
-                *snapped_point = Some(snapped);
-            }
-        }
+            if let Some(hover_pos) = response.hover_pos {
+                let rect = viewport.last_rect();
+                if let Some(sketch_pt) = viewport.screen_to_sketch_point(hover_pos, rect, &local_sketch.plane) {
+                    *hover_point = Some(sketch_pt);
 
-        if response.escape_pressed {
-            if line_start.is_some() {
-                *line_start = None;
-            } else if rect_start.is_some() {
-                *rect_start = None;
-            } else {
-                *tool = SketchTool::None;
-            }
-            return;
-        }
-
-        if *tool == SketchTool::Rectangle && response.clicked {
-            if let Some(snapped) = *snapped_point {
-                if let Some(start) = *rect_start {
-                    if start.distance(snapped) > 1.0e-4 {
-                        let min_x = start.x.min(snapped.x);
-                        let min_y = start.y.min(snapped.y);
-                        let max_x = start.x.max(snapped.x);
-                        let max_y = start.y.max(snapped.y);
-
-                        local_sketch.add_rectangle(
-                            Point2::new(min_x, min_y),
-                            Point2::new(max_x, max_y),
-                        );
-
-                        *rect_start = None;
-                        self.request_param_rebuild_soon();
+                    // Snap to existing points first
+                    let mut snapped = None;
+                    for entity in &local_sketch.entities {
+                        match &entity.geometry {
+                            SketchGeometry::Point(pt) => {
+                                if sketch_pt.distance(pt.position) < SNAP_POINT_THRESHOLD {
+                                    snapped = Some(pt.position);
+                                    break;
+                                }
+                            }
+                            SketchGeometry::LineSegment(line) => {
+                                if sketch_pt.distance(line.start) < SNAP_POINT_THRESHOLD {
+                                    snapped = Some(line.start);
+                                    break;
+                                }
+                                if sketch_pt.distance(line.end) < SNAP_POINT_THRESHOLD {
+                                    snapped = Some(line.end);
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
                     }
-                } else {
-                    *rect_start = Some(snapped);
+
+                    // Fall back to grid snapping
+                    if snapped.is_none() {
+                        snapped = Some(Point2::new(
+                            (sketch_pt.x / SNAP_GRID_SIZE).round() * SNAP_GRID_SIZE,
+                            (sketch_pt.y / SNAP_GRID_SIZE).round() * SNAP_GRID_SIZE,
+                        ));
+                    }
+
+                    *snapped_point = snapped;
                 }
             }
+
+            if response.escape_pressed {
+                if line_start.is_some() {
+                    *line_start = None;
+                } else if rect_start.is_some() {
+                    *rect_start = None;
+                } else {
+                    *tool = SketchTool::None;
+                }
+                return;
+            }
+
+            if *tool == SketchTool::Line && response.clicked {
+                if let Some(snapped) = *snapped_point {
+                    if let Some(start) = *line_start {
+                        if start.distance(snapped) > 1.0e-4 {
+                            local_sketch.add_entity(
+                                SketchGeometry::LineSegment(LineSegment {
+                                    start,
+                                    end: snapped,
+                                }),
+                                false,
+                                None,
+                            );
+                            *line_start = Some(snapped);
+                            should_rebuild = true;
+                        }
+                    } else {
+                        *line_start = Some(snapped);
+                    }
+                }
+            }
+
+            if *tool == SketchTool::Rectangle && response.clicked {
+                if let Some(snapped) = *snapped_point {
+                    if let Some(start) = *rect_start {
+                        if start.distance(snapped) > 1.0e-4 {
+                            let min_x = start.x.min(snapped.x);
+                            let min_y = start.y.min(snapped.y);
+                            let max_x = start.x.max(snapped.x);
+                            let max_y = start.y.max(snapped.y);
+
+                            local_sketch.add_rectangle(
+                                Point2::new(min_x, min_y),
+                                Point2::new(max_x, max_y),
+                            );
+
+                            *rect_start = None;
+                            should_rebuild = true;
+                        }
+                    } else {
+                        *rect_start = Some(snapped);
+                    }
+                }
+            }
+        }
+
+        if should_rebuild {
+            self.request_param_rebuild_soon();
         }
     }
 
@@ -752,7 +808,12 @@ impl MyCadApp {
         let Some(viewport) = &mut self.viewport else { return };
         if let Some(session) = &self.sketch_session {
             viewport.set_sketch_lines(session.build_sketch_lines());
-        } else if let Some(SubEditorState::Sketch { local_sketch, .. }) = &self.sub_editor {
+        } else if let Some(SubEditorState::Sketch {
+            local_sketch,
+            line_start,
+            snapped_point,
+            ..
+        }) = &self.sub_editor {
             // Render parametric sketch lines
             let mut lines = Vec::new();
             for entity in &local_sketch.entities {
@@ -763,6 +824,17 @@ impl MyCadApp {
                     ));
                 }
             }
+
+            // Show preview line if in line mode
+            if let Some(start) = line_start {
+                if let Some(snapped) = snapped_point {
+                    lines.extend(LineVertex::new(
+                        [start.x as f32, start.y as f32, 0.0],
+                        [snapped.x as f32, snapped.y as f32, 0.0],
+                    ));
+                }
+            }
+
             viewport.set_sketch_lines(lines);
         } else {
             viewport.clear_sketch_lines();
@@ -1014,6 +1086,13 @@ impl eframe::App for MyCadApp {
                     // Exit parametric sketch without committing
                     self.exit_param_sketch_mode(false);
                 }
+                if i.key_pressed(egui::Key::L) && !i.modifiers.ctrl {
+                    // Line tool
+                    if let Some(SubEditorState::Sketch { tool, line_start, .. }) = &mut self.sub_editor {
+                        *tool = SketchTool::Line;
+                        *line_start = None;
+                    }
+                }
                 if i.key_pressed(egui::Key::R) && !i.modifiers.ctrl {
                     // Rectangle tool
                     if let Some(SubEditorState::Sketch { tool, rect_start, .. }) = &mut self.sub_editor {
@@ -1128,6 +1207,13 @@ impl eframe::App for MyCadApp {
                             ui.close_menu();
                         }
                     } else if in_param_sketch {
+                        if ui.button("Line Tool              L").clicked() {
+                            if let Some(SubEditorState::Sketch { tool, line_start, .. }) = &mut self.sub_editor {
+                                *tool = SketchTool::Line;
+                                *line_start = None;
+                            }
+                            ui.close_menu();
+                        }
                         if ui.button("Rectangle Tool    R").clicked() {
                             if let Some(SubEditorState::Sketch { tool, rect_start, .. }) = &mut self.sub_editor {
                                 *tool = SketchTool::Rectangle;

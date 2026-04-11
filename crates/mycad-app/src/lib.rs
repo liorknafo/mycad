@@ -1,7 +1,7 @@
 use eframe::egui;
 use mycad_kernel::math::{Plane, Point2, Scalar};
 use mycad_kernel::sketch::{
-    LineSegment, Sketch, SketchEntity, SketchGeometry,
+    LineSegment, Sketch, SketchEntity, SketchEntityId, SketchGeometry,
 };
 use mycad_kernel::features::{ExtrudeParams, extrude};
 use mycad_kernel::tessellation::tessellate_solid;
@@ -55,6 +55,7 @@ pub enum SubEditorState {
         circle_center: Option<Point2>,
         arc_center: Option<Point2>,
         arc_start: Option<Point2>,
+        selected_entity: Option<SketchEntityId>,
     },
     ExtrudeParams {
         node_id: NodeId,
@@ -602,6 +603,7 @@ impl MyCadApp {
                 arc_start,
                 undo_stack,
                 redo_stack,
+                selected_entity,
                 ..
             }) = &mut self.sub_editor
             else {
@@ -770,6 +772,40 @@ impl MyCadApp {
                     } else {
                         *arc_center = Some(snapped);
                     }
+                }
+            }
+
+            // Entity selection: if clicking without an active tool, try to select an entity
+            if response.clicked && *tool == SketchTool::None {
+                if let Some(hover) = *hover_point {
+                    // Try to find an entity near the hover point
+                    let mut closest_entity: Option<SketchEntityId> = None;
+                    let mut closest_distance = SNAP_POINT_THRESHOLD;
+
+                    for entity in &local_sketch.entities {
+                        let dist = match &entity.geometry {
+                            SketchGeometry::Point(pt) => hover.distance(pt.position),
+                            SketchGeometry::LineSegment(line) => {
+                                let closest_pt = line.closest_point(hover);
+                                hover.distance(closest_pt)
+                            }
+                            SketchGeometry::Circle(circle) => {
+                                let radius_dist = hover.distance(circle.center).abs() - circle.radius;
+                                radius_dist.abs()
+                            }
+                            SketchGeometry::Arc(arc) => {
+                                let radius_dist = hover.distance(arc.center).abs() - arc.radius;
+                                radius_dist.abs()
+                            }
+                        };
+
+                        if dist < closest_distance {
+                            closest_distance = dist;
+                            closest_entity = Some(entity.id);
+                        }
+                    }
+
+                    *selected_entity = closest_entity;
                 }
             }
         }
@@ -1031,6 +1067,7 @@ impl MyCadApp {
                 circle_center: None,
                 arc_center: None,
                 arc_start: None,
+                selected_entity: None,
             });
             self.rebuild_pending_since = Some(std::time::Instant::now());
             self.status_message = "Parametric sketch started (experimental)".to_string();
@@ -1568,7 +1605,57 @@ impl eframe::App for MyCadApp {
             .show(ctx, |ui| {
                 ui.heading("Properties");
                 ui.separator();
-                ui.label("No selection");
+
+                // Show parametric sketch entity properties
+                if in_param_sketch {
+                    if let Some(SubEditorState::Sketch {
+                        local_sketch,
+                        selected_entity,
+                        ..
+                    }) = &self.sub_editor {
+                        if let Some(entity_id) = selected_entity {
+                            if let Some(entity) = local_sketch.entity(*entity_id) {
+                                ui.label(format!("Type: {}", entity_type_name(&entity.geometry)));
+                                ui.label(format!("ID: {}", entity_id.0));
+
+                                if let Some(name) = &entity.name {
+                                    ui.label(format!("Name: {}", name));
+                                }
+
+                                ui.separator();
+
+                                match &entity.geometry {
+                                    SketchGeometry::LineSegment(line) => {
+                                        ui.label(format!("Start: ({:.2}, {:.2})", line.start.x, line.start.y));
+                                        ui.label(format!("End: ({:.2}, {:.2})", line.end.x, line.end.y));
+                                        ui.label(format!("Length: {:.2}", line.length()));
+                                    }
+                                    SketchGeometry::Point(pt) => {
+                                        ui.label(format!("Position: ({:.2}, {:.2})", pt.position.x, pt.position.y));
+                                    }
+                                    SketchGeometry::Circle(circle) => {
+                                        ui.label(format!("Center: ({:.2}, {:.2})", circle.center.x, circle.center.y));
+                                        ui.label(format!("Radius: {:.2}", circle.radius));
+                                    }
+                                    SketchGeometry::Arc(arc) => {
+                                        ui.label(format!("Center: ({:.2}, {:.2})", arc.center.x, arc.center.y));
+                                        ui.label(format!("Radius: {:.2}", arc.radius));
+                                        ui.label(format!("Start angle: {:.2}°", arc.start_angle.to_degrees()));
+                                        ui.label(format!("End angle: {:.2}°", arc.end_angle.to_degrees()));
+                                    }
+                                }
+                            } else {
+                                ui.label("Selected entity not found");
+                            }
+                        } else {
+                            ui.label("No selection");
+                        }
+                    } else {
+                        ui.label("Not in sketch mode");
+                    }
+                } else {
+                    ui.label("No selection");
+                }
             });
 
         // Central viewport
@@ -1596,6 +1683,15 @@ impl eframe::App for MyCadApp {
             }
         }
         self.update_sketch_rendering();
+    }
+}
+
+fn entity_type_name(geometry: &SketchGeometry) -> &'static str {
+    match geometry {
+        SketchGeometry::Point(_) => "Point",
+        SketchGeometry::LineSegment(_) => "Line",
+        SketchGeometry::Circle(_) => "Circle",
+        SketchGeometry::Arc(_) => "Arc",
     }
 }
 

@@ -16,7 +16,10 @@ pub struct Viewport3d {
     camera: ArcballCamera,
     sketch_lines: Vec<LineVertex>,
     last_rect: egui::Rect,
-    mesh: Option<mycad_kernel::tessellation::Mesh>,
+    /// Component → mesh for the current branch's visible components.
+    /// Identified by a string key (the app passes a stable id per component).
+    meshes: std::collections::HashMap<String, mycad_kernel::tessellation::Mesh>,
+    meshes_dirty: bool,
 }
 
 impl Viewport3d {
@@ -38,7 +41,8 @@ impl Viewport3d {
             camera: ArcballCamera::default(),
             sketch_lines: Vec::new(),
             last_rect: egui::Rect::NOTHING,
-            mesh: None,
+            meshes: std::collections::HashMap::new(),
+            meshes_dirty: false,
         })
     }
 
@@ -71,19 +75,39 @@ impl Viewport3d {
     }
 
     pub fn set_mesh(&mut self, mesh: Option<mycad_kernel::tessellation::Mesh>) {
-        self.mesh = mesh;
+        self.meshes.clear();
+        if let Some(m) = mesh {
+            self.meshes.insert("__default__".into(), m);
+        }
         self.sketch_lines.clear();
+        self.meshes_dirty = true;
         self.fit_mesh();
     }
 
+    pub fn set_component_mesh(&mut self, component_key: String, mesh: mycad_kernel::tessellation::Mesh) {
+        self.meshes.insert(component_key, mesh);
+        self.meshes_dirty = true;
+    }
+
+    pub fn remove_component_mesh(&mut self, component_key: &str) {
+        self.meshes.remove(component_key);
+        self.meshes_dirty = true;
+    }
+
     pub fn clear_mesh(&mut self) {
-        self.set_mesh(None);
+        self.meshes.clear();
+        self.meshes_dirty = true;
+    }
+
+    pub fn iter_meshes(&self) -> impl Iterator<Item = (&String, &mycad_kernel::tessellation::Mesh)> {
+        self.meshes.iter()
     }
 
     pub fn fit_mesh(&mut self) {
-        if let Some(ref mesh) = self.mesh {
-            let mut min = Point3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
-            let mut max = Point3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+        let mut min = Point3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+        let mut max = Point3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+
+        for mesh in self.meshes.values() {
             for vertex in &mesh.vertices {
                 min.x = min.x.min(vertex.x);
                 min.y = min.y.min(vertex.y);
@@ -92,6 +116,9 @@ impl Viewport3d {
                 max.y = max.y.max(vertex.y);
                 max.z = max.z.max(vertex.z);
             }
+        }
+
+        if min.x != f64::INFINITY && max.x != f64::NEG_INFINITY {
             let center = Point3::new(
                 (min.x + max.x) * 0.5,
                 (min.y + max.y) * 0.5,
@@ -167,11 +194,41 @@ impl Viewport3d {
         vr.escape_pressed = ui.input(|i| i.key_pressed(egui::Key::Escape));
 
         let aspect = (rect.width() / rect.height().max(1.0)) as f64;
+
+        // Concatenate all meshes for rendering
+        let combined_mesh = if !self.meshes.is_empty() {
+            let mut vertices = Vec::new();
+            let mut indices = Vec::new();
+            let mut current_index = 0usize;
+
+            for mesh in self.meshes.values() {
+                vertices.extend(&mesh.vertices);
+                for &[i0, i1, i2] in &mesh.indices {
+                    indices.push([
+                        current_index + i0,
+                        current_index + i1,
+                        current_index + i2,
+                    ]);
+                }
+                current_index += mesh.vertices.len();
+            }
+
+            Some(std::sync::Arc::new(mycad_kernel::tessellation::Mesh {
+                vertices,
+                indices,
+                normals: Vec::new(),
+            }))
+        } else {
+            None
+        };
+
         let callback = ViewportCallback {
             view_proj: self.camera.view_projection_matrix(aspect),
             sketch_lines: self.sketch_lines.clone(),
-            mesh_data: self.mesh.clone().map(std::sync::Arc::new),
+            mesh_data: combined_mesh,
         };
+
+        self.meshes_dirty = false;
 
         ui.painter().rect_filled(rect, 0.0, egui::Color32::from_rgb(26, 26, 34));
         ui.painter()

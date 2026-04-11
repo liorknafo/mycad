@@ -9,6 +9,10 @@ use mycad_renderer::overlay::LineVertex;
 use mycad_renderer::{ProjectionMode, StandardView, Viewport3d, ViewportResponse};
 use mycad_kernel::parametric::types::{Document as ParamDocument, NodeId};
 use mycad_kernel::parametric::ops::extrude_op::ExtrudeOp;
+use mycad_kernel::parametric::ops::datum_plane::CreateDatumPlaneOp;
+use mycad_kernel::parametric::ops::sketch_op::CreateSketchOp;
+use mycad_kernel::parametric::feature::{InputRef, Operation, WorldRef};
+use mycad_kernel::parametric::rebuild::{rebuild, mark_dirty};
 
 const SNAP_GRID_SIZE: Scalar = 1.0;
 const SNAP_POINT_THRESHOLD: Scalar = 0.3;
@@ -597,6 +601,135 @@ impl MyCadApp {
         } else {
             viewport.clear_sketch_lines();
         }
+    }
+
+    /// Start a parametric sketch on the XY world plane.
+    #[allow(dead_code)]
+    fn start_param_sketch(&mut self) {
+        // Create a datum plane operation on the world XY plane.
+        let datum_result = self.document.append_op(Operation::CreateDatumPlane(
+            CreateDatumPlaneOp::world(WorldRef::PlaneXY, "XY"),
+        ));
+
+        if datum_result.is_err() {
+            self.status_message = "Failed to create datum plane".to_string();
+            return;
+        }
+
+        // Create a sketch on that datum plane.
+        let sketch = Sketch::world_xy();
+        let sketch_op = CreateSketchOp::on_datum_plane(
+            InputRef::World(WorldRef::PlaneXY),
+            sketch.clone(),
+            "Sketch",
+        );
+        let sketch_result = self.document.append_op(Operation::CreateSketch(Box::new(sketch_op)));
+
+        if let Ok(sketch_node) = sketch_result {
+            self.sub_editor = Some(SubEditorState::Sketch {
+                node_id: sketch_node,
+                local_sketch: Box::new(sketch),
+                undo_stack: Vec::new(),
+                redo_stack: Vec::new(),
+                tool: SketchTool::None,
+                hover_point: None,
+                snapped_point: None,
+                line_start: None,
+                rect_start: None,
+                circle_center: None,
+                arc_center: None,
+                arc_start: None,
+            });
+            self.rebuild_pending_since = Some(std::time::Instant::now());
+            self.status_message = "Parametric sketch started (experimental)".to_string();
+        } else {
+            self.status_message = "Failed to create sketch".to_string();
+        }
+    }
+
+    /// Commit the current parametric sketch edits back to the document.
+    #[allow(dead_code)]
+    fn commit_param_sketch_edits(&mut self) -> Result<(), String> {
+        let sub_editor = match &mut self.sub_editor {
+            Some(SubEditorState::Sketch { local_sketch, node_id, .. }) => {
+                (*node_id, local_sketch.clone())
+            }
+            _ => return Err("Not in sketch editing mode".to_string()),
+        };
+
+        let (sketch_node_id, edited_sketch) = sub_editor;
+
+        // Update the sketch in the document.
+        {
+            let node = self.document.node_mut(sketch_node_id)
+                .map_err(|e| format!("Sketch node not found: {:?}", e))?;
+            if let Operation::CreateSketch(op) = &mut node.operation {
+                op.sketch = (*edited_sketch).clone();
+            } else {
+                return Err("Expected CreateSketch operation".to_string());
+            }
+        }
+
+        mark_dirty(&mut self.document, sketch_node_id)
+            .map_err(|e| format!("Failed to mark dirty: {:?}", e))?;
+
+        self.request_param_rebuild_soon();
+        Ok(())
+    }
+
+    /// Cancel parametric sketch edits without committing.
+    #[allow(dead_code)]
+    fn cancel_param_sketch_edits(&mut self) {
+        self.sub_editor = None;
+        self.rebuild_pending_since = None;
+        self.status_message = "Sketch editing cancelled".to_string();
+    }
+
+    /// Request a deferred rebuild. The rebuild will execute on the next update
+    /// if enough time has passed since the last edit.
+    #[allow(dead_code)]
+    fn request_param_rebuild_soon(&mut self) {
+        self.rebuild_pending_since = Some(std::time::Instant::now());
+    }
+
+    /// Perform rebuild if enough time has passed since the last edit.
+    /// Uses a 100ms debounce to avoid thrashing with frequent updates.
+    #[allow(dead_code)]
+    fn perform_param_rebuild_if_due(&mut self) {
+        const REBUILD_DEBOUNCE_MS: u128 = 100;
+
+        let rebuild_now = if let Some(since) = self.rebuild_pending_since {
+            since.elapsed().as_millis() >= REBUILD_DEBOUNCE_MS
+        } else {
+            false
+        };
+
+        if !rebuild_now {
+            return;
+        }
+
+        self.rebuild_pending_since = None;
+
+        if let Err(e) = rebuild(&mut self.document) {
+            self.status_message = format!("Rebuild failed: {:?}", e);
+            return;
+        }
+
+        // After successful rebuild, update viewport with the final mesh.
+        // For now, just find the last feature's output.
+        if let Some(last_node_id) = self.document.nodes.keys().last().copied() {
+            if let Ok(node) = self.document.node(last_node_id) {
+                if let Some(output) = &node.cached_output {
+                    if let Some(mesh) = &output.mesh {
+                        if let Some(viewport) = &mut self.viewport {
+                            viewport.set_mesh(Some(mesh.clone()));
+                        }
+                    }
+                }
+            }
+        }
+
+        self.status_message = "Parametric rebuild complete".to_string();
     }
 }
 

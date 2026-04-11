@@ -600,6 +600,8 @@ impl MyCadApp {
                 circle_center,
                 arc_center,
                 arc_start,
+                undo_stack,
+                redo_stack,
                 ..
             }) = &mut self.sub_editor
             else {
@@ -669,6 +671,8 @@ impl MyCadApp {
                 if let Some(snapped) = *snapped_point {
                     if let Some(start) = *line_start {
                         if start.distance(snapped) > 1.0e-4 {
+                            undo_stack.push(local_sketch.clone());
+                            redo_stack.clear();
                             local_sketch.add_entity(
                                 SketchGeometry::LineSegment(LineSegment {
                                     start,
@@ -690,6 +694,8 @@ impl MyCadApp {
                 if let Some(snapped) = *snapped_point {
                     if let Some(start) = *rect_start {
                         if start.distance(snapped) > 1.0e-4 {
+                            undo_stack.push(local_sketch.clone());
+                            redo_stack.clear();
                             let min_x = start.x.min(snapped.x);
                             let min_y = start.y.min(snapped.y);
                             let max_x = start.x.max(snapped.x);
@@ -714,6 +720,8 @@ impl MyCadApp {
                     if let Some(center) = *circle_center {
                         let radius = center.distance(snapped);
                         if radius > 1.0e-4 {
+                            undo_stack.push(local_sketch.clone());
+                            redo_stack.clear();
                             local_sketch.add_entity(
                                 SketchGeometry::Circle(mycad_kernel::sketch::Circle {
                                     center,
@@ -738,6 +746,8 @@ impl MyCadApp {
                     if let (Some(center), Some(start)) = (*arc_center, *arc_start) {
                         let radius = center.distance(start);
                         if radius > 1.0e-4 {
+                            undo_stack.push(local_sketch.clone());
+                            redo_stack.clear();
                             let start_angle = (start.y - center.y).atan2(start.x - center.x);
                             let end_angle = (snapped.y - center.y).atan2(snapped.x - center.x);
                             local_sketch.add_entity(
@@ -1249,6 +1259,26 @@ impl eframe::App for MyCadApp {
                         *tool = SketchTool::Arc;
                         *arc_center = None;
                         *arc_start = None;
+                    }
+                }
+                if i.key_pressed(egui::Key::Z) && i.modifiers.ctrl {
+                    // Ctrl+Z = Undo
+                    if let Some(SubEditorState::Sketch { local_sketch, undo_stack, redo_stack, .. }) = &mut self.sub_editor {
+                        if let Some(prev_sketch) = undo_stack.pop() {
+                            redo_stack.push(local_sketch.clone());
+                            *local_sketch = prev_sketch;
+                            self.request_param_rebuild_soon();
+                        }
+                    }
+                }
+                if i.key_pressed(egui::Key::Y) && i.modifiers.ctrl {
+                    // Ctrl+Y = Redo
+                    if let Some(SubEditorState::Sketch { local_sketch, undo_stack, redo_stack, .. }) = &mut self.sub_editor {
+                        if let Some(next_sketch) = redo_stack.pop() {
+                            undo_stack.push(local_sketch.clone());
+                            *local_sketch = next_sketch;
+                            self.request_param_rebuild_soon();
+                        }
                     }
                 }
                 if i.key_pressed(egui::Key::Enter) {

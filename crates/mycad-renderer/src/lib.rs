@@ -4,6 +4,7 @@ pub mod overlay;
 pub mod picking;
 
 pub use crate::mesh::{MeshResources, MeshVertex, MeshUniforms};
+pub use crate::picking::{pick_triangle, PickHit};
 
 use eframe::{egui, egui_wgpu};
 use egui_wgpu::wgpu;
@@ -127,6 +128,41 @@ impl Viewport3d {
             let size = ((max.x - min.x).powi(2) + (max.y - min.y).powi(2) + (max.z - min.z).powi(2)).sqrt();
             self.camera.fit(center, size);
         }
+    }
+
+    /// Cast a ray through the pixel under `screen_pos` and return the nearest
+    /// triangle hit across all currently loaded meshes. Triangle indices are
+    /// flattened in mesh-iteration order — callers that need per-mesh resolution
+    /// can use [`iter_meshes`](Self::iter_meshes).
+    pub fn pick_mesh_triangle(
+        &self,
+        screen_pos: egui::Pos2,
+        rect: egui::Rect,
+    ) -> Option<PickHit> {
+        let local_x = (screen_pos.x - rect.left()) as Scalar;
+        let local_y = (screen_pos.y - rect.top()) as Scalar;
+        let (origin, dir) = self.camera.screen_to_ray(
+            local_x,
+            local_y,
+            rect.width() as Scalar,
+            rect.height() as Scalar,
+        );
+
+        let mut best: Option<PickHit> = None;
+        let mut flat_offset = 0usize;
+        for mesh in self.meshes.values() {
+            if let Some(hit) = pick_triangle(mesh, origin, dir) {
+                let absolute = PickHit {
+                    triangle_index: flat_offset + hit.triangle_index,
+                    ..hit
+                };
+                if best.is_none_or(|b| absolute.distance < b.distance) {
+                    best = Some(absolute);
+                }
+            }
+            flat_offset += mesh.indices.len();
+        }
+        best
     }
 
     pub fn screen_to_sketch_point(

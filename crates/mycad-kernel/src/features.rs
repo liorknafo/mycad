@@ -129,19 +129,7 @@ pub struct ExtrudeResult {
 /// * `Ok(ExtrudeResult)` - The created solid and related topology
 /// * `Err(ExtrudeError)` - If extrusion fails
 ///
-/// # Example
-/// ```
-/// use mycad_kernel::sketch::Sketch;
-/// use mycad_kernel::features::{extrude, ExtrudeParams};
-///
-/// let mut sketch = Sketch::world_xy();
-/// // Add a rectangle to the sketch...
-/// sketch.add_rectangle(mycad_kernel::math::Point2::new(0.0, 0.0), mycad_kernel::math::Point2::new(10.0, 5.0));
-///
-/// let params = ExtrudeParams::new(5.0);
-/// let result = extrude(&sketch, params).unwrap();
-/// ```
-pub fn extrude(sketch: &Sketch, params: ExtrudeParams) -> Result<ExtrudeResult, ExtrudeError> {
+pub(crate) fn extrude(sketch: &Sketch, params: ExtrudeParams) -> Result<ExtrudeResult, ExtrudeError> {
     // Validate parameters
     if nearly_zero(params.distance) {
         return Err(ExtrudeError::InvalidDistance);

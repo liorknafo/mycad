@@ -141,6 +141,18 @@ impl Plane {
         }
     }
 
+    pub fn xy() -> Self {
+        Self::new(Point3::ZERO, Vec3::Z)
+    }
+
+    pub fn xz() -> Self {
+        Self::new(Point3::ZERO, Vec3::Y)
+    }
+
+    pub fn yz() -> Self {
+        Self::new(Point3::ZERO, Vec3::X)
+    }
+
     pub fn coordinate_system(&self) -> CoordinateSystem {
         CoordinateSystem::new(self.origin, self.u_axis, self.v_axis, self.normal)
     }
